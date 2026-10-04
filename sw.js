@@ -1,5 +1,5 @@
 // Service worker: lưu toàn bộ app vào máy để mở được khi không có mạng
-const CACHE = 'ks-solar-f93dcfd2';
+const CACHE = 'ks-solar-8637ab50';
 const FILES = [
  "./",
  "fonts.css",

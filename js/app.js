@@ -77,8 +77,30 @@ async function flush() { clearTimeout(saveTimer); if (S.dirty) await save(); whi
 
 // ---------- ảnh ----------
 let pickCtx = null;
-function pick(ctx) { pickCtx = ctx; const el = $('#filePick'); el.value = ''; el.click(); }
-$('#filePick').addEventListener('change', e => handleFiles([...e.target.files]));
+// Chọn nguồn ảnh: chụp mới bằng camera hoặc lấy từ thư viện ảnh trên máy
+function pick(ctx) {
+  pickCtx = ctx;
+  document.querySelector('.sheet')?.remove();
+  const it = ctx.kind === 'item' ? ALL_ITEMS.find(i => i.k === ctx.k) : SLOTS.find(s => s.k === ctx.k);
+  const title = ctx.kind === 'item' ? `${it.code}  ${it.l}` : `${it.n}  ${it.l}`;
+  const sh = document.createElement('div'); sh.className = 'sheet'; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-label', 'Thêm ảnh');
+  sh.innerHTML = `<div class="sheet-in"><div class="sheet-t">Thêm ảnh · ${esc(title)}</div>
+    <button type="button" class="sheet-b" data-src="cam">${ICON.cam}<span><b>Chụp ảnh</b><small>Mở camera sau của điện thoại</small></span></button>
+    <button type="button" class="sheet-b" data-src="lib">${ICON.img}<span><b>Chọn từ thư viện</b><small>${ctx.kind === 'item' ? 'Chọn được nhiều ảnh một lần' : 'Chọn 1 ảnh có sẵn trên máy'}</small></span></button>
+    <button type="button" class="btn" data-src="x" style="width:100%">Huỷ</button></div>`;
+  document.body.appendChild(sh);
+  sh.onclick = e => {
+    const b = e.target.closest('[data-src]');
+    if (!b) { if (e.target === sh) sh.remove(); return; }
+    sh.remove();
+    if (b.dataset.src === 'x') { pickCtx = null; return; }
+    const el = b.dataset.src === 'cam' ? $('#filePick') : $('#fileLib');
+    el.multiple = b.dataset.src === 'lib' && ctx.kind === 'item';
+    el.value = ''; el.click();
+  };
+}
+$('#filePick').addEventListener('change', e => handleFiles([...e.target.files], 'cam'));
+$('#fileLib').addEventListener('change', e => handleFiles([...e.target.files], 'lib'));
 
 async function processImage(file, stamp) {
   let bmp;
@@ -99,18 +121,19 @@ async function processImage(file, stamp) {
   const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', .82));
   return { blob, w, h };
 }
-function stampFor(label) {
-  const d = new Date(); const p = n => String(n).padStart(2, '0');
+function stampFor(label, when) {
+  const d = when ? new Date(when) : new Date(); const p = n => String(n).padStart(2, '0');
   const who = S.cur.v.ten_cty || S.cur.v.dai_dien || '';
   return `${label}\n${S.cur.code}${who ? ' · ' + who : ''} · ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-async function handleFiles(files) {
+async function handleFiles(files, src) {
   if (!files.length || !pickCtx) return;
   const ctx = pickCtx; pickCtx = null;
+  if (ctx.kind !== 'item') files = files.slice(0, 1);
   if (!Store.canUpload) { toast('Bạn cần quyền chỉnh sửa để tải ảnh lên.'); return; }
   for (const f of files) {
     const key = ctx.kind === 'item' ? ctx.k : ctx.kind + ':' + ctx.k;
-    const tmp = { tmpId: Math.random().toString(36).slice(2), url: URL.createObjectURL(f), status: 'Đang xử lý…', file: f, ctx };
+    const tmp = { tmpId: Math.random().toString(36).slice(2), url: URL.createObjectURL(f), status: 'Đang xử lý…', file: f, ctx, src };
     (S.pending[key] = S.pending[key] || []).push(tmp); renderKey(ctx);
     await uploadOne(tmp, key);
   }
@@ -121,10 +144,11 @@ async function uploadOne(tmp, key) {
     let label;
     if (ctx.kind === 'item') { const it = ALL_ITEMS.find(i => i.k === ctx.k); label = `${it.code}-${(S.cur.ph[ctx.k] || []).length + 1}  ${it.l}`; }
     else { const sl = SLOTS.find(s => s.k === ctx.k); label = `${sl.n}  ${sl.l}`; }
-    const { blob, w, h } = await processImage(tmp.file, stampFor(label));
+    const when = tmp.src === 'lib' && tmp.file.lastModified ? tmp.file.lastModified : null;
+    const { blob, w, h } = await processImage(tmp.file, stampFor(label, when));
     tmp.status = 'Đang lưu ảnh…'; renderKey(ctx);
     const id = await Store.upload(blob, 'image/jpeg');
-    const ref = { id, w, h, at: Date.now() };
+    const ref = { id, w, h, at: Date.now(), src: tmp.src || 'cam' };
     if (ctx.kind === 'item') (S.cur.ph[ctx.k] = S.cur.ph[ctx.k] || []).push(ref);
     else { const old = S.cur.slots[ctx.k]; S.cur.slots[ctx.k] = ref; if (old) Store.delImage(old.id); }
     S.pending[key] = (S.pending[key] || []).filter(p => p !== tmp);
@@ -300,10 +324,10 @@ function slotHTML(sl) {
   let inner;
   if (pend) inner = `<img src="${pend.url}" alt=""><span class="slotst" ${pend.failed ? `data-retry="${pend.tmpId}"` : ''}>${esc(pend.status)}</span>`;
   else if (ref) inner = `<img src="${imgSrc(ref.id)}" alt="${esc(sl.l)}">`;
-  else inner = `<span class="ph">${sl.wide ? ICON.img : ICON.cam}${Store.canUpload ? (sl.wide ? 'Chụp bản vẽ tay / chọn ảnh sketch' : 'Chạm để chụp') : 'Chưa có ảnh'}</span>`;
+  else inner = `<span class="ph">${sl.wide ? ICON.img : ICON.cam}${Store.canUpload ? (sl.wide ? 'Chụp hoặc chọn ảnh bản vẽ' : 'Chạm để chụp / chọn ảnh') : 'Chưa có ảnh'}</span>`;
   return `<div class="slot ${sl.wide ? 'wide' : ''}" id="sl_${sl.k}"><div class="sh"><b>${esc(sl.n)}</b>${esc(sl.l)}</div>
   <button type="button" class="sb" data-slot="${esc(sl.k)}" ${!Store.canUpload && !ref ? 'disabled' : ''} aria-label="${ref ? 'Xem' : 'Chụp'} ảnh ${esc(sl.l)}">${inner}</button>
-  ${ref && Store.canUpload ? `<div class="acts"><button class="btn ghost" data-slotnew="${esc(sl.k)}">Chụp lại</button><button class="btn ghost" data-slotrm="${esc(sl.k)}">Xoá</button></div>` : ''}</div>`;
+  ${ref && Store.canUpload ? `<div class="acts"><button class="btn ghost" data-slotnew="${esc(sl.k)}">Đổi ảnh</button><button class="btn ghost" data-slotrm="${esc(sl.k)}">Xoá</button></div>` : ''}</div>`;
 }
 function secCount(sec) { const f = sec.items.filter(it => isFilled(it, S.cur)).length; return [f, sec.items.length]; }
 
@@ -319,8 +343,10 @@ function calcHTML() {
       ${r.ok ? `<ol class="steps">${r.steps.map(x => `<li>${esc(x)}</li>`).join('')}</ol>` : `<p class="warn">${esc(r.msg)}</p>`}
       ${Object.keys(s.ov || {}).some(k => s.ov[k]) ? '<button type="button" class="btn ghost" data-resetall style="align-self:flex-start">↺ Tính lại tất cả theo số liệu</button>' : ''}
       <details ${s.calc && Object.keys(s.calc).length ? 'open' : ''}><summary>Giả định tính toán (chỉnh được)</summary>
-      <div class="pgrid">${CALC_FIELDS.filter(f => !f.hyb || sysType(s) !== 'On-grid').map(f => `<label class="pf"><span>${esc(f.l)}${f.hint ? `<small>${esc(f.hint)}</small>` : ''}</span><span class="field"><input data-calc="${f.k}" inputmode="decimal" value="${esc(s.calc[f.k] ?? '')}" placeholder="${esc(f.money ? fmtN(P._def[f.k]) : String(P._def[f.k]))}" class="hasunit" ${ro}><span class="unit">${esc(f.u)}</span></span></label>`).join('')}</div>
-      <p class="note">Để trống là dùng giá trị mặc định (chữ mờ). Giá điện mặc định theo mục II.11, tỷ lệ dùng ban ngày theo mục II.12.</p></details></div>`;
+      <div class="pgrid">${CALC_FIELDS.filter(f => (!f.hyb || P.type !== 'On-grid') && (!f.tou || P.tt !== 'sh')).map(f => f.opts
+        ? `<label class="pf"><span>${esc(f.l)}<small>Mặc định theo toạ độ GPS (II.1), nếu có</small></span><span class="field"><select data-calc="${f.k}" ${ro}><option value="">Tự động: ${esc(REGIONS[P.vungAuto].l)}</option>${f.opts.map(([k, l]) => `<option value="${k}" ${s.calc[f.k] === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></span></label>`
+        : `<label class="pf"><span>${esc(f.l)}${f.hint ? `<small>${esc(f.hint)}</small>` : ''}</span><span class="field"><input data-calc="${f.k}" inputmode="decimal" value="${esc(s.calc[f.k] ?? '')}" placeholder="${esc(f.money ? fmtN(P._def[f.k]) : String(P._def[f.k]).replace('.', ','))}" class="hasunit" ${ro}><span class="unit">${esc(f.u)}</span></span></label>`).join('')}</div>
+      <p class="note">Để trống là dùng giá trị mặc định (chữ mờ). Giá điện theo QĐ 1279/QĐ-BCT (10/5/2025), cấp điện áp dưới 6 kV, chưa gồm VAT; khung giờ theo QĐ 963/QĐ-BCT (22/4/2026). Khách hàng cấp điện áp cao hơn hoặc khi EVN điều chỉnh giá, hãy nhập lại giá.</p></details></div>`;
   }
   return `<div class="modebox"><div class="seg wide" role="radiogroup" aria-label="Cách lập đề xuất kỹ thuật">
     <button type="button" role="radio" data-vimode="manual" aria-checked="${mode === 'manual'}" aria-pressed="${mode === 'manual'}" ${ro}><span class="radio"></span>Tự điền</button>
@@ -391,7 +417,7 @@ function refreshItem(k) {
   if (k === 'ten_cty' || k === 'dai_dien') $('.formhead h1').textContent = S.cur.v.ten_cty || S.cur.v.dai_dien || 'Hồ sơ khảo sát mới';
 }
 // Tính lại mục VI khi số liệu đầu vào thay đổi (chế độ tự động)
-const CALC_INPUTS = new Set(['kwh_thang', 'tien_dien', 'dau_tu', 'dt_lap', 'gia_dien', 'tg_dung_dien', 'nguon_dien', 'loai_he', 'luu_tru']);
+const CALC_INPUTS = new Set(['kwh_thang', 'tien_dien', 'dau_tu', 'dt_lap', 'gia_dien', 'tg_dung_dien', 'nguon_dien', 'loai_he', 'luu_tru', 'huong_mai', 'do_doc']);
 function refreshAuto() {
   if (S.cur.v.vi_mode !== 'auto') return;
   applyAuto(S.cur);
@@ -426,7 +452,7 @@ function bindForm() {
       if (CALC_INPUTS.has(t.dataset.other)) refreshAuto();
     }
     else if (t.dataset.name) { S.cur.names[t.dataset.name] = t.value; markDirty(); }
-    else if (t.dataset.calc) { const v = t.value.replace(/[^\d.,]/g, '').replace(',', '.'); S.cur.calc[t.dataset.calc] = v; markDirty(); refreshAuto(); }
+    else if (t.dataset.calc) { const v = t.tagName === 'SELECT' ? t.value : t.value.replace(/[^\d.,]/g, '').replace(',', '.'); S.cur.calc[t.dataset.calc] = v; markDirty(); refreshAuto(); }
   };
   app.onclick = e => {
     const t = e.target.closest('button,[data-jump],[data-view],[data-retry]'); if (!t) return;
@@ -541,7 +567,7 @@ function getLocation(k, btn) {
     S.cur.v[k] = (base ? base + ' — ' : '') + `GPS: ${la}, ${ln} (±${Math.round(acc)} m)`;
     markDirty();
     const el = $('#it_' + k); const tmp = document.createElement('div'); tmp.innerHTML = itemHTML(ALL_ITEMS.find(i => i.k === k)); el.replaceWith(tmp.firstElementChild); refreshItem(k);
-    toast(`Đã ghi toạ độ (sai số ±${Math.round(acc)} m)`);
+    toast(`Đã ghi toạ độ (sai số ±${Math.round(acc)} m)`); refreshAuto();
   }, err => {
     btn.disabled = false; btn.classList.remove('busy');
     if (Store.kind === 'artifact') toast('Trang trong Claude không được phép lấy vị trí. Dùng bản app trên Vercel, hoặc dán toạ độ từ Google Maps.');

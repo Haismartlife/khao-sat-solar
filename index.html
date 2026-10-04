@@ -178,11 +178,20 @@ details summary{cursor:pointer;font-weight:600;font-size:13px;color:var(--navy);
 .slotst{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);color:#fff;font-size:12px}
 .banner.off{background:var(--bad-soft)}
 @media (max-width:480px){.pgrid{grid-template-columns:1fr}.bar .btn{padding:9px 11px}}
+.sheet{position:fixed;inset:0;z-index:40;background:rgba(10,20,30,.45);display:flex;align-items:flex-end;justify-content:center}
+.sheet-in{background:var(--surface);width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px}
+.sheet-t{font-size:13px;color:var(--muted);font-weight:600;padding-bottom:4px}
+.sheet-b{display:flex;gap:12px;align-items:center;text-align:left;border:1px solid var(--line);background:var(--bg);border-radius:var(--r);padding:12px 14px;color:var(--ink)}
+.sheet-b svg{width:26px;height:26px;color:var(--navy);flex:none}
+.sheet-b span{display:flex;flex-direction:column}
+.sheet-b small{color:var(--muted);font-size:12px}
+.field select{width:100%;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:9px 11px;font:inherit}
 </style>
 
 </head><body>
 <div class="wrap" id="app"></div>
 <input type="file" id="filePick" accept="image/*" capture="environment" hidden>
+<input type="file" id="fileLib" accept="image/*" hidden>
 <script src="js/data.js"></script>
 <script src="js/fields.js"></script>
 <script src="js/calc.js"></script>
